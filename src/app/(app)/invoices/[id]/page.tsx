@@ -47,11 +47,13 @@ export default function InvoicePage() {
     <>
       <PageHeader back={{ href: "/invoices", label: "Invoices" }}
         title={<span className="num">{inv.number}</span>}
-        sub={<span className="flex flex-wrap items-center gap-2"><Badge status={inv.status} overdue={inv.overdue} /> {clientSnap.name}{inv.emailed_at && <span className="text-faint">· Emailed {fmtDate(inv.emailed_at)}</span>}</span>}
+        sub={<span className="flex flex-wrap items-center gap-2"><Badge status={inv.status} overdue={inv.overdue} /> {clientSnap.name}{inv.status !== "void" && (inv.emailed_at
+          ? <span className="rounded-full bg-ok-soft px-2.5 py-0.5 text-[12px] font-medium text-ok">✓ Sent to {inv.last_emailed_to || "client"} on {fmtDate(inv.emailed_at)}{inv.email_count > 1 ? ` (${inv.email_count} times)` : ""}</span>
+          : <span className="rounded-full bg-warn-soft px-2.5 py-0.5 text-[12px] font-medium text-warn">Not sent to the client yet</span>)}</span>}
         actions={<>
           <Button variant="secondary" onClick={() => openPdf(`/invoices/${id}/pdf`).catch((e) => toast(e.message, "bad"))}>View PDF</Button>
           <Button variant="secondary" onClick={() => openPdf(`/invoices/${id}/pdf`, true, `${inv.number}.pdf`).catch((e) => toast(e.message, "bad"))}>Download</Button>
-          {inv.status !== "void" && canBill(firm.role) && <Button variant="secondary" onClick={() => setModal("email")}>Email to client</Button>}
+          {inv.status !== "void" && canBill(firm.role) && <Button variant={inv.emailed_at ? "secondary" : "primary"} onClick={() => setModal("email")}>{inv.emailed_at ? "Email again" : "Email to client"}</Button>}
           {open && canRecordPayments(firm.role) && <Button onClick={() => setModal("pay")}>Record payment</Button>}
         </>} />
 
@@ -130,7 +132,7 @@ export default function InvoicePage() {
             <ul className="space-y-2 text-[13px] text-muted">
               <li>Created {fmtDateTime(inv.created_at)}</li>
               <li>Issued {fmtDateTime(inv.issued_at)}</li>
-              {inv.emailed_at && <li>Last emailed {fmtDateTime(inv.emailed_at)}</li>}
+              {inv.emailed_at && <li>Emailed {inv.email_count > 1 ? `${inv.email_count} times, last` : ""} {fmtDateTime(inv.emailed_at)}{inv.last_emailed_to ? ` to ${inv.last_emailed_to}` : ""}</li>}
               {inv.voided_at && <li className="text-bad">Voided {fmtDateTime(inv.voided_at)}</li>}
             </ul>
           </Card>
@@ -184,12 +186,13 @@ function EmailModal({ invoice, to: defaultTo, onClose, onDone }: { invoice: any;
   const [busy, setBusy] = useState(false);
   const send = async () => {
     setError(""); setBusy(true);
-    try { const r = await api(`/invoices/${invoice.id}/email`, { method: "POST", json: { to: to || undefined, message: message || undefined } }); onDone(r.to); }
+    try { const r = await api(`/invoices/${invoice.id}/email`, { method: "POST", json: { to: to || undefined, message: message || undefined, resend: !!invoice.emailed_at } }); onDone(r.to); }
     catch (e: any) { setError(e.message); setBusy(false); }
   };
   return (
-    <Modal open onClose={onClose} title={`Email ${invoice.number}`}
-      footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button onClick={send} loading={busy}>Send</Button></>}>
+    <Modal open onClose={onClose} title={invoice.emailed_at ? `Send ${invoice.number} again?` : `Email ${invoice.number}`}
+      footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button onClick={send} loading={busy}>{invoice.emailed_at ? "Yes, send again" : "Send"}</Button></>}>
+      {invoice.emailed_at && <Notice tone="warn">This invoice was already emailed{invoice.last_emailed_to ? ` to ${invoice.last_emailed_to}` : ""} on {fmtDateTime(invoice.emailed_at)}{invoice.email_count > 1 ? `, ${invoice.email_count} times in total` : ""}. Only send it again if the client asks for it.</Notice>}
       <Field label="To"><Input type="email" value={to} onChange={(e) => setTo(e.target.value)} /></Field>
       <Field label="Message (optional)" hint="The invoice PDF is attached automatically."><Textarea rows={4} value={message} onChange={(e) => setMessage(e.target.value)} placeholder={`Please find attached invoice ${invoice.number}.`} /></Field>
       {error && <Notice tone="bad">{error}</Notice>}

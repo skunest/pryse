@@ -20,7 +20,7 @@ export const GET = route(async (req) => {
   const clientId = url.searchParams.get("client_id");
   const q = (url.searchParams.get("q") || "").replace(/[%,()]/g, "").trim();
   let query = ctx.db.from("invoices")
-    .select("id, number, status, issue_date, due_date, total_cents, paid_cents, vat_cents, created_at, emailed_at, client:clients(id, name), matter:matters(id, file_number, title)")
+    .select("id, number, status, issue_date, due_date, total_cents, paid_cents, vat_cents, created_at, emailed_at, email_count, last_emailed_to, client:clients(id, name), matter:matters(id, file_number, title)")
     .eq("firm_id", ctx.firmId).order("created_at", { ascending: false }).limit(500);
   if (status && status !== "overdue" && status !== "outstanding") query = query.eq("status", status);
   if (status === "outstanding" || status === "overdue") query = query.in("status", ["issued", "partially_paid"]);

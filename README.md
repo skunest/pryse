@@ -35,7 +35,7 @@ Pryse is a standalone system. It is separate from the firm's website and has its
 ### 1. Supabase
 
 1. Create a **new** Supabase project for Pryse. Do not use the website's project. Choose a region (for example Johannesburg if offered, otherwise the nearest).
-2. In the SQL editor, run `supabase/migrations/0001_init.sql`. It creates the tables, rules, security policies and the private `documents` storage bucket. If you already ran `0001_init.sql` before 4 November 2026, also run `0002_single_firm.sql`.
+2. In the SQL editor, run `supabase/migrations/0001_init.sql`. It creates the tables, rules, security policies and the private `documents` storage bucket. Then run the other files in `supabase/migrations` in number order (`0002_single_firm.sql`, `0003_send_tracking.sql`). If you set up Pryse earlier, run only the ones you have not run yet. Each is safe to run once.
 3. Go to **Authentication → Sign In / Providers** and turn off **Allow new users to sign up**. Only invited people can use Pryse.
 4. Go to **Authentication → URL Configuration**:
    - Site URL: `https://<your-pryse-domain>`
@@ -54,7 +54,7 @@ Copy `.env.local.example` to `.env.local` locally, and add the same values in Ve
 | Variable | Value |
 |---|---|
 | `NEXT_PUBLIC_PRYSE_ENV` | `qa` on the test system, `production` on the live system only. Anything other than `production` marks every screen, invoice PDF, signed document and email with a TESTING badge. |
-| `NEXT_PUBLIC_SITE_URL` | Pryse's address, e.g. `https://pryse.vercel.app` |
+| `NEXT_PUBLIC_SITE_URL` | Pryse's public address, e.g. `https://pryse.vercel.app`. **Required.** Every link in emails (signing, invites) uses it. Use the production domain, never a deployment URL like `pryse-abc123-skun.vercel.app`: Vercel protects those and asks visitors to log in to Vercel. |
 | `NEXT_PUBLIC_SUPABASE_URL` | From Supabase → Project Settings → API |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Same page (anon / publishable key) |
 | `SUPABASE_SERVICE_ROLE_KEY` | Same page (service role / secret key). **Server only.** Never prefix it with `NEXT_PUBLIC_`. |

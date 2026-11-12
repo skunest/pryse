@@ -6,6 +6,7 @@ import { audit } from "@/lib/audit";
 import { documentType, sha256 } from "@/lib/signing";
 import { upload } from "@/lib/storage";
 import { emailSigningLinks, logEvent, SIGNER_COLS } from "@/lib/signflow";
+import { blockDuplicate, findEarlierSends } from "@/lib/duplicates";
 
 const MAX_BYTES = 15 * 1024 * 1024;
 
@@ -21,11 +22,18 @@ const meta = z.object({
     email: z.string().trim().toLowerCase().email("Each signer needs a valid email"),
   })).min(1, "Add at least one signer").max(10),
   send: z.coerce.boolean().default(false),
+  allow_duplicate: z.coerce.boolean().default(false),
 });
 
 export const GET = route(async (req) => {
   const ctx = await requireFirm(req);
-  const status = new URL(req.url).searchParams.get("status");
+  const sp = new URL(req.url).searchParams;
+  const status = sp.get("status");
+  // Earlier sends of the same PDF (fingerprint) or the same title for a client, to warn before sending twice.
+  if (sp.get("sha256") || sp.get("title")) {
+    const earlier = await findEarlierSends(ctx.db, ctx.firmId, { sha256: sp.get("sha256") || "", title: sp.get("title") || "", clientId: sp.get("client_id") });
+    return json({ earlier });
+  }
   let q = ctx.db.from("signing_requests")
     .select(`id, title, document_type, status, created_at, sent_at, completed_at, expires_at, client:clients(id, name), matter:matters(id, file_number), signers(${"id, name, email, status, signed_at"})`)
     .eq("firm_id", ctx.firmId).order("created_at", { ascending: false }).limit(500);
@@ -48,7 +56,7 @@ export const POST = route(async (req) => {
     title: form.get("title"), document_type: form.get("document_type"),
     client_id: form.get("client_id") || null, matter_id: form.get("matter_id") || null,
     message: form.get("message") || null, expires_days: form.get("expires_days") || 14,
-    signers: signersRaw, send: form.get("send") === "true",
+    signers: signersRaw, send: form.get("send") === "true", allow_duplicate: form.get("allow_duplicate") === "true",
   });
 
   const type = documentType(input.document_type);
@@ -67,11 +75,16 @@ export const POST = route(async (req) => {
     throw badRequest("This file could not be read as a PDF");
   }
 
+  const fingerprint = sha256(bytes);
+  if (input.send) {
+    blockDuplicate(await findEarlierSends(ctx.db, ctx.firmId, { sha256: fingerprint, title: input.title, clientId: input.client_id ?? null }), input.allow_duplicate);
+  }
+
   const expires = new Date(Date.now() + input.expires_days * 86400_000).toISOString();
   const request = must(await ctx.db.from("signing_requests").insert({
     firm_id: ctx.firmId, client_id: input.client_id ?? null, matter_id: input.matter_id ?? null,
     title: input.title, document_type: type.value, message: input.message ?? null,
-    original_name: file.name.slice(0, 200), original_sha256: sha256(bytes), page_count: pages,
+    original_name: file.name.slice(0, 200), original_sha256: fingerprint, page_count: pages,
     expires_at: expires, created_by: ctx.user.id,
   }).select("*").single()) as any;
 

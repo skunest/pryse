@@ -25,15 +25,19 @@ export default function SigningDetail() {
   const load = useCallback(() => api(`/signing/${id}`).then(setD).catch((e) => setError(e.message)), [id]);
   useEffect(() => { load(); }, [load]);
 
-  const act = async (name: string, path: string, method = "POST", ok?: string) => {
+  const act = async (name: string, path: string, method = "POST", ok?: string, json?: unknown) => {
     setBusy(name);
     try {
-      const r = await api(path, { method });
+      const r = await api(path, { method, json });
       const failed = (r?.delivery || []).filter((x: any) => !x.sent);
       if (failed.length) toast(`The email to ${failed.map((f: any) => f.email).join(", ")} was not delivered. Check the email settings.`, "bad");
       else if (ok) toast(ok);
       return r;
-    } catch (e: any) { toast(e.message, "bad"); }
+    } catch (e: any) {
+      if (String(e.code || "").startsWith("already_sent") && name === "send") {
+        if (confirm(`${e.message}\n\nSend this one as well?`)) { setBusy(""); return act(name, path, method, ok, { allow_duplicate: true }); }
+      } else toast(e.message, "bad");
+    }
     finally { setBusy(""); }
   };
 
@@ -53,7 +57,7 @@ export default function SigningDetail() {
   return (
     <>
       <PageHeader back={{ href: "/signing", label: "E-signing" }} title={r.title}
-        sub={<span className="flex flex-wrap items-center gap-2"><Badge status={r.status} /> {r.document_type_label} · Ref <span className="font-mono text-[12px]">{r.reference}</span></span>}
+        sub={<span className="flex flex-wrap items-center gap-2"><Badge status={r.status} /> {r.sent_at ? <span className="text-[12px] font-medium text-ok">✓ Sent {fmtDate(r.sent_at)}</span> : <span className="rounded-full bg-warn-soft px-2 py-0.5 text-[12px] font-medium text-warn">Not sent yet</span>} {r.document_type_label} · Ref <span className="font-mono text-[12px]">{r.reference}</span></span>}
         actions={<>
           {r.status === "completed" && <Button onClick={() => download("signed")} loading={busy === "signed"}>Download signed copy</Button>}
           <Button variant="secondary" onClick={() => download("original")} loading={busy === "original"}>Original</Button>

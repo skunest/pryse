@@ -21,6 +21,11 @@ export async function GET(req: Request) {
   const run = async (name: string, fn: () => Promise<void>) => {
     try { await fn(); checks[name] = "ok"; } catch (e: any) { checks[name] = `FAILED: ${e?.message || e}`; }
   };
+  await run("links in emails", async () => {
+    const u = process.env.NEXT_PUBLIC_SITE_URL;
+    if (!u) throw new Error("NEXT_PUBLIC_SITE_URL is not set. Links fall back to the Vercel URL and may ask clients to log in to Vercel.");
+    if (/-[a-z0-9]{8,}-[a-z0-9-]+\.vercel\.app/i.test(u)) throw new Error(`${u} looks like a one-off deployment URL. Use the production domain instead.`);
+  });
   await run("public key", async () => {
     const { error } = await authDb().from("firms").select("id", { head: true, count: "exact" });
     if (error && error.code !== "42501") throw error;

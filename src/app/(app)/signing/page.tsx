@@ -44,7 +44,7 @@ export default function SigningPage() {
                 <td className="px-4 py-3"><Link href={`/signing/${r.id}`} className="font-medium">{r.title}</Link></td>
                 <td className="px-4 py-3 text-muted">{r.client?.name ?? "-"}</td>
                 <td className="px-4 py-3 text-muted"><span className="num">{signed}/{r.signers.length}</span> <span className="hidden sm:inline">· {r.signers.map((s: any) => s.name).join(", ")}</span></td>
-                <td className="px-4 py-3 text-muted">{r.sent_at ? fmtDate(r.sent_at) : "-"}</td>
+                <td className="px-4 py-3">{r.sent_at ? <span className="whitespace-nowrap text-[12px] font-medium text-ok">✓ {fmtDate(r.sent_at)}</span> : <span className="rounded-full bg-warn-soft px-2 py-0.5 text-[12px] font-medium text-warn">Not sent</span>}</td>
                 <td className="px-4 py-3"><Badge status={r.status} /></td>
               </tr>
             );

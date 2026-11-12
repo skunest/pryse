@@ -2,8 +2,9 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/browser";
+import { fmtDate } from "@/lib/money";
 import type { Client } from "@/components/ClientForm";
-import { Button, Card, Field, Input, Notice, PageHeader, Select, Textarea, useToast, cx } from "@/components/ui";
+import { Button, Card, Field, Input, Modal, Notice, PageHeader, Select, Textarea, useToast, cx } from "@/components/ui";
 
 type DocType = { value: string; label: string; allowed: boolean; note?: string };
 type Signer = { key: number; name: string; email: string };
@@ -27,6 +28,9 @@ function NewSigning() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<"" | "draft" | "send">("");
   const [drag, setDrag] = useState(false);
+  const [sha, setSha] = useState("");
+  const [earlier, setEarlier] = useState<any[]>([]);
+  const [dup, setDup] = useState("");
 
   useEffect(() => {
     api("/signing/types").then((r) => setTypes(r.types));
@@ -40,17 +44,27 @@ function NewSigning() {
     if (c) setSigners((s) => (s.length === 1 && !s[0].name && !s[0].email ? [{ key: s[0].key, name: c.name, email: c.email || "" }] : s));
   }, [clientId, clients]);
 
+  // Warn early if this PDF, or a document with this title for this client, was already sent.
+  useEffect(() => {
+    if (!sha && !(clientId && title.trim())) { setEarlier([]); return; }
+    const t = setTimeout(() => {
+      api(`/signing?sha256=${sha}&title=${encodeURIComponent(title.trim())}&client_id=${clientId}`).then((r) => setEarlier(r.earlier || [])).catch(() => setEarlier([]));
+    }, 400);
+    return () => clearTimeout(t);
+  }, [sha, title, clientId]);
+
   const type = useMemo(() => types.find((t) => t.value === docType), [types, docType]);
 
   const pick = (f: File | null | undefined) => {
     if (!f) return;
     if (!f.name.toLowerCase().endsWith(".pdf")) { setError("Only PDF documents can be sent for signature."); return; }
     if (f.size > 15 * 1024 * 1024) { setError("The PDF must be smaller than 15 MB."); return; }
-    setError(""); setFile(f);
+    setError(""); setFile(f); setSha("");
+    f.arrayBuffer().then((b) => crypto.subtle.digest("SHA-256", b)).then((d) => setSha(Array.from(new Uint8Array(d)).map((x) => x.toString(16).padStart(2, "0")).join(""))).catch(() => {});
     if (!title) setTitle(f.name.replace(/\.pdf$/i, "").replace(/[_-]+/g, " "));
   };
 
-  const submit = async (send: boolean) => {
+  const submit = async (send: boolean, allowDuplicate = false) => {
     setError("");
     if (!file) return setError("Upload the PDF to be signed.");
     if (!type?.allowed) return setError(type?.note || "This type of document cannot be signed electronically.");
@@ -67,13 +81,18 @@ function NewSigning() {
     fd.set("expires_days", days);
     fd.set("signers", JSON.stringify(clean.map(({ name, email }) => ({ name, email }))));
     fd.set("send", String(send));
+    if (allowDuplicate) fd.set("allow_duplicate", "true");
     try {
       const r = await api("/signing", { method: "POST", body: fd });
       const failed = (r.delivery || []).filter((x: any) => !x.sent);
       if (send && failed.length) toast(`Created, but the email to ${failed.map((f: any) => f.email).join(", ")} was not delivered. Check the email settings.`, "bad");
       else toast(send ? "Sent for signature" : "Draft saved");
       router.replace(`/signing/${r.request.id}`);
-    } catch (e: any) { setError(e.message); setBusy(""); }
+    } catch (e: any) {
+      setBusy("");
+      if (String(e.code || "").startsWith("already_sent")) setDup(e.message);
+      else setError(e.message);
+    }
   };
 
   return (
@@ -136,6 +155,16 @@ function NewSigning() {
               </Select></Field>
             </div>
           </Card>
+          {earlier.length > 0 && (
+            <Notice tone="warn">
+              <strong>Already sent.</strong> {earlier.slice(0, 3).map((r: any) => (
+                <span key={r.id} className="mt-1 block">
+                  <a href={`/signing/${r.id}`} className="underline">{r.title}</a> to {(r.signers || []).map((s: any) => s.name).join(", ")} on {fmtDate(r.sent_at)} ({r.status === "completed" ? "signed" : "awaiting signature"})
+                </span>
+              ))}
+              <span className="mt-1 block">Use Send reminder on the existing request instead of sending it again.</span>
+            </Notice>
+          )}
           {error && <Notice tone="bad">{error}</Notice>}
           <div className="space-y-2">
             <Button className="w-full" onClick={() => submit(true)} loading={busy === "send"} disabled={!type?.allowed}>Send for signature</Button>
@@ -144,6 +173,11 @@ function NewSigning() {
           <p className="text-[12px] leading-relaxed text-muted">Signatures are ordinary electronic signatures under the Electronic Communications and Transactions Act 25 of 2002. When everyone has signed, Pryse seals the document with a certificate of completion and emails a copy to all parties.</p>
         </div>
       </div>
+      <Modal open={!!dup} onClose={() => setDup("")} title="This was already sent"
+        footer={<><Button variant="secondary" onClick={() => setDup("")}>Don&apos;t send</Button><Button onClick={() => { setDup(""); submit(true, true); }}>Send again anyway</Button></>}>
+        <p className="text-sm text-ink-2">{dup}</p>
+        <p className="text-sm text-muted">If the client lost the email, open the existing request and click Send reminder instead. That sends a fresh link without creating a second copy.</p>
+      </Modal>
     </>
   );
 }
