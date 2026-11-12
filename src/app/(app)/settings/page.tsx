@@ -146,6 +146,7 @@ function Team() {
   const [rows, setRows] = useState<any[] | null>(null);
   const [error, setError] = useState("");
   const [invite, setInvite] = useState(false);
+  const [shareLink, setShareLink] = useState<{ email: string; link: string; error?: string } | null>(null);
   const admin = canAdmin(me.role);
   const load = useCallback(() => api("/members").then((r) => setRows(r.members)).catch((e) => setError(e.message)), []);
   useEffect(() => { load(); }, [load]);
@@ -154,7 +155,11 @@ function Team() {
     try { await api(`/members/${m.user_id}`, { method: "PATCH", json: { role } }); toast("Role updated"); load(); } catch (e: any) { toast(e.message, "bad"); }
   };
   const resend = async (m: any) => {
-    try { await api(`/members/${m.user_id}`, { method: "PATCH", json: { resend_invite: true } }); toast(`Invite sent again to ${m.email}`); } catch (e: any) { toast(e.message, "bad"); }
+    try {
+      const r = await api(`/members/${m.user_id}`, { method: "PATCH", json: { resend_invite: true } });
+      if (r.link) setShareLink({ email: m.email, link: r.link, error: r.email_error });
+      else toast(`Invite sent again to ${m.email}`);
+    } catch (e: any) { toast(e.message, "bad"); }
   };
   const remove = async (m: any) => {
     if (!confirm(`Remove ${m.full_name || m.email} from Pryse? They will no longer be able to sign in to the firm.`)) return;
@@ -195,12 +200,24 @@ function Team() {
           <li><strong>Staff:</strong> view invoices, manage clients, send documents for signature.</li>
         </ul>
       </Card>
-      {invite && <InviteModal onClose={() => setInvite(false)} onDone={(email) => { setInvite(false); toast(`Invite sent to ${email}`); load(); }} />}
+      {invite && <InviteModal onClose={() => setInvite(false)} onDone={(email, r) => {
+        setInvite(false); load();
+        if (r?.link) setShareLink({ email, link: r.link, error: r.email_error });
+        else toast(`Invite sent to ${email}`);
+      }} />}
+      {shareLink && (
+        <Modal open onClose={() => setShareLink(null)} title="Email could not be sent"
+          footer={<><Button variant="secondary" onClick={() => setShareLink(null)}>Close</Button><Button onClick={() => { navigator.clipboard?.writeText(shareLink.link); toast("Link copied"); }}>Copy link</Button></>}>
+          <Notice tone="warn">The invite for {shareLink.email} was created, but the email did not go out{shareLink.error ? ` (${shareLink.error})` : ""}.</Notice>
+          <p className="text-sm text-ink-2">Copy this personal link and send it to them yourself, for example on WhatsApp. It works once, for that person only.</p>
+          <Input readOnly value={shareLink.link} onFocus={(e) => e.currentTarget.select()} className="font-mono text-[12px]" />
+        </Modal>
+      )}
     </>
   );
 }
 
-function InviteModal({ onClose, onDone }: { onClose: () => void; onDone: (email: string) => void }) {
+function InviteModal({ onClose, onDone }: { onClose: () => void; onDone: (email: string, r?: { link?: string; email_error?: string }) => void }) {
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [role, setRole] = useState<Role>("fee_earner");
@@ -208,7 +225,7 @@ function InviteModal({ onClose, onDone }: { onClose: () => void; onDone: (email:
   const [busy, setBusy] = useState(false);
   const send = async () => {
     setError(""); setBusy(true);
-    try { await api("/members", { method: "POST", json: { email, full_name: name || undefined, role } }); onDone(email); }
+    try { const r = await api("/members", { method: "POST", json: { email, full_name: name || undefined, role } }); onDone(email, r); }
     catch (e: any) { setError(e.message); setBusy(false); }
   };
   return (

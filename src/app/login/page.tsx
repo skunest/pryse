@@ -40,7 +40,7 @@ export default function LoginPage() {
     setError(""); setInfo("");
     if (!email) { setError("Enter your email address first."); return; }
     setLoading(true);
-    await supabase().auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/auth/confirm` });
+    await fetch("/api/public/reset", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) }).catch(() => {});
     setLoading(false);
     setInfo("If that email has an account, a link to reset the password is on its way.");
   };

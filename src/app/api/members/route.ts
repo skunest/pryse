@@ -3,7 +3,7 @@ import { route, json, must, body, badRequest } from "@/lib/http";
 import { requireFirm, ADMIN_ROLES } from "@/lib/auth";
 import { adminDb } from "@/lib/supabase";
 import { audit } from "@/lib/audit";
-import { siteUrl } from "@/lib/site";
+import { sendInvite } from "@/lib/account-emails";
 
 export const GET = route(async (req) => {
   const ctx = await requireFirm(req);
@@ -32,20 +32,18 @@ export const POST = route(async (req) => {
   const input = invite.parse(await body(req));
   const admin = adminDb();
 
-  let userId: string | null = null;
-  const inv = await admin.auth.admin.inviteUserByEmail(input.email, {
-    redirectTo: `${siteUrl()}/auth/confirm`,
-    data: { full_name: input.full_name ?? null },
-  });
-  if (inv.error) {
-    // Already has an account: look it up and add them to the firm.
-    if (!/already|registered|exists/i.test(inv.error.message)) throw badRequest(inv.error.message);
-    const { data } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
-    userId = data.users.find((u) => u.email?.toLowerCase() === input.email)?.id ?? null;
-    if (!userId) throw badRequest("Could not invite that email address");
-  } else {
-    userId = inv.data.user.id;
+  const existing = must(await admin.from("firm_members").select("user_id").eq("firm_id", ctx.firmId).eq("email", input.email).maybeSingle());
+  if (existing) throw badRequest("That person is already in your team. Use Resend if they did not get the invite.");
+  const firm = must(await admin.from("firms").select("name, legal_name").eq("id", ctx.firmId).single()) as any;
+
+  let sent;
+  try {
+    sent = await sendInvite({ email: input.email, fullName: input.full_name, firmName: firm.legal_name || firm.name, invitedBy: ctx.user.email });
+  } catch (e: any) {
+    throw badRequest(`Could not invite that email address: ${e.message}`);
   }
+  const userId = sent.userId;
+  if (!userId) throw badRequest("Could not invite that email address");
 
   const { error } = await admin.from("firm_members").insert({
     firm_id: ctx.firmId, user_id: userId, role: input.role, full_name: input.full_name ?? null, email: input.email,
@@ -53,5 +51,6 @@ export const POST = route(async (req) => {
   if (error && (error as any).code === "23505") throw badRequest("That person is already in your team");
   if (error) throw error;
   await audit(ctx, req, "member", userId, "invited", { email: input.email, role: input.role });
-  return json({ user_id: userId }, 201);
+  // If the email could not be sent, give the administrator the link to share another way.
+  return json({ user_id: userId, emailed: sent.sent, link: sent.sent ? undefined : sent.url, email_error: sent.error }, 201);
 });

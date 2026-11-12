@@ -43,6 +43,14 @@ Pryse is a standalone system. It is separate from the firm's website and has its
 5. Go to **Authentication → Emails** and paste the templates from `supabase/email-templates.md` (Invite user and Reset password).
 6. Optional but recommended: under **Authentication → Emails → SMTP Settings**, use Resend's SMTP so that invites come from your own domain.
 
+### Invites and password emails
+
+Pryse sends team invites and password reset emails itself, through Resend, so there is no hourly limit. Supabase's built-in mailer allows only a couple of emails an hour, which is why inviting several people through it fails. Supabase only creates the secure one-time link.
+
+- If an invite email cannot be sent, Pryse shows the invite link so an administrator can copy it and send it another way.
+- Optional: in Supabase, under Authentication, Sign In / Providers, Email, raise **Email OTP Expiration** to 86400 seconds (24 hours) so invite links last a full day.
+- The Supabase email templates are only used for the very first invite, sent from the Supabase dashboard.
+
 ### 2. Resend (email)
 
 Create an API key and verify the sending domain (for example `skun.co.za` or the firm's domain). Without a key, Pryse still works, but it will not send invoices, signing links or codes.

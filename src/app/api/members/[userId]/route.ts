@@ -3,7 +3,7 @@ import { route, json, must, body, badRequest, notFound } from "@/lib/http";
 import { requireFirm, ADMIN_ROLES } from "@/lib/auth";
 import { adminDb } from "@/lib/supabase";
 import { audit } from "@/lib/audit";
-import { siteUrl } from "@/lib/site";
+import { sendInvite } from "@/lib/account-emails";
 
 const patch = z.object({
   role: z.enum(["admin", "fee_earner", "bookkeeper", "staff"]).optional(),
@@ -16,7 +16,7 @@ export const PATCH = route<{ userId: string }>(async (req, { userId }) => {
   const input = patch.parse(await body(req));
   const admin = adminDb();
   const member = must(
-    await admin.from("firm_members").select("role, email").eq("firm_id", ctx.firmId).eq("user_id", userId).maybeSingle(),
+    await admin.from("firm_members").select("role, email, full_name").eq("firm_id", ctx.firmId).eq("user_id", userId).maybeSingle(),
   ) as any;
   if (!member) throw notFound("Team member not found");
   if (member.role === "owner" && input.role) throw badRequest("The owner's role cannot be changed");
@@ -27,12 +27,18 @@ export const PATCH = route<{ userId: string }>(async (req, { userId }) => {
   if (Object.keys(update).length) {
     must(await admin.from("firm_members").update(update).eq("firm_id", ctx.firmId).eq("user_id", userId));
   }
+  let resent: { emailed: boolean; link?: string; email_error?: string } | null = null;
   if (input.resend_invite && member.email) {
-    const r = await admin.auth.admin.inviteUserByEmail(member.email, { redirectTo: `${siteUrl()}/auth/confirm` });
-    if (r.error) throw badRequest("This person has already accepted their invite. They can use 'Forgot password' to sign in.");
+    const firm = must(await admin.from("firms").select("name, legal_name").eq("id", ctx.firmId).single()) as any;
+    try {
+      const r = await sendInvite({ email: member.email, fullName: member.full_name, firmName: firm.legal_name || firm.name, invitedBy: ctx.user.email });
+      resent = { emailed: r.sent, link: r.sent ? undefined : r.url, email_error: r.error };
+    } catch (e: any) {
+      throw badRequest(`Could not resend the invite: ${e.message}`);
+    }
   }
   await audit(ctx, req, "member", userId, "updated", input as Record<string, unknown>);
-  return json({ ok: true });
+  return json({ ok: true, ...(resent ?? {}) });
 });
 
 export const DELETE = route<{ userId: string }>(async (req, { userId }) => {
